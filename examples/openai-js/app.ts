@@ -1,11 +1,17 @@
 import fs from 'node:fs'
 import OpenAI from 'openai'
-import type { ChatCompletionTool } from 'openai/resources/chat/completions'
+import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions'
 import { Sandbox, Result } from '@e2b/code-interpreter'
+import type { Execution } from '@e2b/code-interpreter'
 import { OutputMessage } from '@e2b/code-interpreter'
 import * as dotenv from 'dotenv'
 
 dotenv.config()
+
+// The model writes the Python, so it will sometimes write Python that does not
+// parse or that throws. Hand the traceback back and let it fix its own cell,
+// the way a person would - one bad cell should not end the run.
+const MAX_TURNS = 4
 
 const MODEL_NAME = 'gpt-5.6-terra' // Choose a different model by uncommenting. It needs function-calling support on
 // /v1/chat/completions - gpt-5.6-terra and gpt-5.6-luna do, gpt-5.6-sol does not.
@@ -57,64 +63,80 @@ const tools: ChatCompletionTool[] = [
     }
 ]
 
-async function codeInterpret(codeInterpreter: Sandbox, code: string): Promise<Result[]> {
+// Returns the whole execution, errors included, so the caller can decide
+// whether to give up or hand the traceback back to the model.
+async function codeInterpret(codeInterpreter: Sandbox, code: string): Promise<Execution> {
     console.log('Running code interpreter...')
 
-    const exec = await codeInterpreter.runCode(code, {
+    return await codeInterpreter.runCode(code, {
         onStderr: (msg: OutputMessage) => console.log('[Code Interpreter stderr]', msg),
         onStdout: (stdout: OutputMessage) => console.log('[Code Interpreter stdout]', stdout),
     })
-
-    if (exec.error) {
-        console.log('[Code Interpreter ERROR]', exec.error)
-        throw new Error(exec.error.value)
-    }
-    return exec.results
 }
 
 const client = new OpenAI()
 
-async function processToolCall(codeInterpreter: Sandbox, toolCall: any): Promise<Result[]> {
+async function processToolCall(codeInterpreter: Sandbox, toolCall: any): Promise<Execution | null> {
     if (toolCall.function.name === 'execute_python') {
         const toolInput = JSON.parse(toolCall.function.arguments)
         return await codeInterpret(codeInterpreter, toolInput.code)
     }
-    return []
+    return null
 }
 
 async function chatWithLLM(codeInterpreter: Sandbox, userMessage: string): Promise<Result[]> {
     console.log(`\n${'='.repeat(50)}\nUser Message: ${userMessage}\n${'='.repeat(50)}`)
 
-    console.log('Waiting for the LLM to respond...')
-    const completion = await client.chat.completions.create({
-        model: MODEL_NAME,
-        messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userMessage }
-        ],
-        // gpt-5.6-* are reasoning models; function tools on chat.completions
-        // require reasoning_effort 'none' (or the /v1/responses API).
-        reasoning_effort: 'none',
-        tools: tools,
-        tool_choice: 'auto'
-    })
+    const messages: ChatCompletionMessageParam[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userMessage }
+    ]
 
-    const message = completion.choices[0].message
-    console.log('\nInitial Response:', message)
+    for (let turn = 1; turn <= MAX_TURNS; turn++) {
+        console.log(`\nWaiting for the LLM to respond (turn ${turn}/${MAX_TURNS})...`)
+        const completion = await client.chat.completions.create({
+            model: MODEL_NAME,
+            messages,
+            // gpt-5.6-* are reasoning models; function tools on chat.completions
+            // require reasoning_effort 'none' (or the /v1/responses API).
+            reasoning_effort: 'none',
+            tools: tools,
+            tool_choice: 'auto'
+        })
 
-    if (message.tool_calls) {
+        const message = completion.choices[0].message
+        console.log('\nResponse:', message)
+        messages.push(message)
+
+        // Deliberately a failure: with no tool call there was no code to run, so the
+        // example demonstrated nothing. A missing *chart* is fine; missing code is not.
+        if (!message.tool_calls?.length) {
+            throw new Error('The model returned no tool call, so there was no code to execute.')
+        }
+
         const toolCall = message.tool_calls[0]
         // v7 widened tool_calls to a union of function and custom tool calls.
         if (toolCall.type !== 'function') throw new Error('Expected a function tool call.')
         console.log(`\nTool Used: ${toolCall.function.name}\nTool Input: ${toolCall.function.arguments}`)
 
-        const codeInterpreterResults = await processToolCall(codeInterpreter, toolCall)
-        console.log(`Tool Result: ${codeInterpreterResults}`)
-        return codeInterpreterResults
+        const execution = await processToolCall(codeInterpreter, toolCall)
+        if (!execution) throw new Error(`The model called an unknown tool: ${toolCall.function.name}`)
+
+        if (execution.error) {
+            console.log('[Code Interpreter ERROR]', execution.error)
+            messages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: `The cell failed.\n${execution.error.name}: ${execution.error.value}\n\n${execution.error.traceback}\n\nFix the code and call execute_python again.`
+            })
+            continue
+        }
+
+        console.log(`Tool Result: ${execution.results}`)
+        return execution.results
     }
-    // Deliberately a failure: with no tool call there was no code to run, so the
-    // example demonstrated nothing. A missing *chart* is fine; missing code is not.
-    throw new Error('The model returned no tool call, so there was no code to execute.')
+
+    throw new Error(`The model did not produce runnable code within ${MAX_TURNS} turns.`)
 }
 
 async function uploadDataset(codeInterpreter: Sandbox): Promise<string> {
