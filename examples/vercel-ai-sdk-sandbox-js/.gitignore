@@ -1,7 +1,8 @@
-# artefacts the creative-production lane pulls back out of the sandbox
-contact-sheet.png
-ad-set.tar.gz
-key-visual.png
+# artefacts the creative-production lane pulls back out of the sandbox.
+# Anchored with a leading slash so they only match here, at the example root.
+/contact-sheet.png
+/ad-set.tar.gz
+/key-visual.png
 
 # Restored from skills-lock.json by `npm run skills`
 .agents/skills/

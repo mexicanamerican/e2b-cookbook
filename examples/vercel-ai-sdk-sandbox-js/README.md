@@ -124,19 +124,6 @@ per chat in the dev-server process, so there is no resume state to persist — a
 because the sandbox is created here rather than by the provider, the server can
 still write the hero in and read the artefacts back out.
 
-**Fixture mode** replays a turn with no sandbox, no agent and no tokens spent —
-useful for working on the UI, and how its states are tested:
-
-```bash
-open 'http://localhost:3000/?fixture=happy'          # a full successful run
-open 'http://localhost:3000/?fixture=audit-fail'     # a variant fails the brand audit
-open 'http://localhost:3000/?fixture=no-key'         # missing key
-open 'http://localhost:3000/?fixture=sandbox-error'  # sandbox refuses to start
-```
-
-The artefacts fixture mode shows are real output from a real run, committed
-under `web/fixtures/`. Add `&pace=200` to replay faster.
-
 ## How to run
 
 **1. Set the API keys**

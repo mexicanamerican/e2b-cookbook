@@ -2,12 +2,12 @@
 // [agent skills](https://skills.sh) into .agents/skills; the harness takes them
 // as a `skills` option and each adapter surfaces them natively — Pi materializes
 // them inside the sandbox, so the agent discovers them the way it discovers its
-// own. Nothing here uploads anything: the fonts are the one exception, below.
+// own. Nothing here uploads anything — the pages the agent writes are HTML, and
+// the browser that opens them loads the webfonts.
 import { readdir, readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { HarnessAgentSkill } from '@ai-sdk/harness/agent'
-import type { Sandbox } from 'e2b'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -17,12 +17,11 @@ const SKILLS_DIR = resolve(HERE, '../.agents/skills')
 /** Skill files ride the harness as UTF-8; anything else is not a skill file. */
 const TEXT_FILE = /\.(md|txt|json|html|csv)$/
 
-/**
- * canvas-design ships 54 licensed typefaces. They are binary, and skill files
- * are text, so the fonts travel separately and the brief names this directory.
- */
-const FONTS_SOURCE = join(SKILLS_DIR, 'canvas-design', 'canvas-fonts')
-export const SANDBOX_FONTS_DIR = '/home/user/brief/canvas-fonts'
+async function skillNames(): Promise<string[]> {
+  return (await readdir(SKILLS_DIR, { withFileTypes: true }).catch(() => []))
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+}
 
 async function walk(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
@@ -50,9 +49,7 @@ function describe(content: string, fallback: string): string {
  * an error — the example still runs, it just runs without the craft.
  */
 export async function loadSkills(): Promise<HarnessAgentSkill[]> {
-  const names = (await readdir(SKILLS_DIR, { withFileTypes: true }).catch(() => []))
-    .filter(entry => entry.isDirectory())
-    .map(entry => entry.name)
+  const names = await skillNames()
 
   const skills = await Promise.all(
     names.map(async (name): Promise<HarnessAgentSkill | null> => {
@@ -60,10 +57,10 @@ export async function loadSkills(): Promise<HarnessAgentSkill[]> {
       const content = await readFile(join(root, 'SKILL.md'), 'utf-8').catch(() => null)
       if (content === null) return null
 
-      // Everything beside SKILL.md that the runtime can actually read. The
-      // fonts are excluded by extension; their licences travel with them.
+      // Everything beside SKILL.md that the runtime can actually read — a
+      // skill's references travel with it. TEXT_FILE keeps binaries out.
       const extras = (await walk(root)).filter(
-        path => TEXT_FILE.test(path) && !path.startsWith(FONTS_SOURCE) && !path.endsWith('SKILL.md'),
+        path => TEXT_FILE.test(path) && !path.endsWith('SKILL.md'),
       )
       const files = await Promise.all(
         extras.map(async path => ({
@@ -76,38 +73,4 @@ export async function loadSkills(): Promise<HarnessAgentSkill[]> {
   )
 
   return skills.filter((skill): skill is HarnessAgentSkill => skill !== null)
-}
-
-/**
- * The renderer, which rides in as a file rather than as instructions.
- *
- * Ad layout is arithmetic — safe areas, box splits, fitting copy — and asking a
- * model to re-derive it from prose on every run is what made each size fail in
- * its own way. The agent runs this and audits the result; it does not design it.
- */
-const RENDERER_SOURCE = join(HERE, 'sandbox', 'render.py')
-export const SANDBOX_RENDERER = '/home/user/brief/render.py'
-
-export async function mountRenderer(sandbox: Sandbox): Promise<void> {
-  await sandbox.files.write(SANDBOX_RENDERER, await readFile(RENDERER_SOURCE, 'utf-8'))
-}
-
-/** Written in batches: one request per typeface is 54 round trips. */
-const BATCH = 24
-
-/** Copy the typefaces in beside the brief. Returns how many landed. */
-export async function mountFonts(sandbox: Sandbox): Promise<number> {
-  const files = await walk(FONTS_SOURCE)
-  for (let index = 0; index < files.length; index += BATCH) {
-    const batch = await Promise.all(
-      files.slice(index, index + BATCH).map(async path => ({
-        path: `${SANDBOX_FONTS_DIR}/${relative(FONTS_SOURCE, path).split(sep).join('/')}`,
-        // The copy re-homes the Buffer's bytes into a standalone ArrayBuffer;
-        // Node pools Buffers, so `.buffer` alone can carry a whole slab.
-        data: new Uint8Array(await readFile(path)).buffer,
-      })),
-    )
-    await sandbox.files.write(batch)
-  }
-  return files.length
 }

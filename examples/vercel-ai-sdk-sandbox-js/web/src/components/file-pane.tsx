@@ -10,6 +10,7 @@ import { HOME_DIR, type Artifact, type Entry } from '@/lib/protocol'
 const KIND_LABEL: Record<Artifact['kind'], string> = {
   image: 'png',
   archive: 'tar',
+  html: 'web',
   text: 'txt',
 }
 
@@ -68,16 +69,19 @@ const FileRow = memo(function FileRow({
 export function FilePane({
   announced,
   chatId,
-  query,
   busy,
   live,
+  gallery,
+  servedRoot,
 }: {
   announced: Artifact[]
   chatId: string
-  query: string
   busy: boolean
   /** Whether this run's files can still be read. */
   live: boolean
+  /** The sandbox host serving `servedRoot`, once the agent has started it. */
+  gallery: string | null
+  servedRoot: string | null
 }) {
   const panel = usePanel('right')
   const listHeight = useListHeight()
@@ -89,7 +93,7 @@ export function FilePane({
   // React Query owns the polling. Its structural sharing means a tick that
   // finds the directory unchanged hands back the very same objects, so the
   // list does not re-render between renders of the agent's work.
-  const { data: entries = [] } = useDirectory(chatId, dir, query, busy)
+  const { data: entries = [] } = useDirectory(chatId, dir, busy)
 
   // History outlives the sandbox — a restart or the timeout leaves the file
   // names in the transcript with nothing behind them.
@@ -109,17 +113,28 @@ export function FilePane({
     )
   }, [entries, announced, dir])
 
-  // Show the first image as it appears, upgrading to the contact sheet when it
-  // lands. A manual pick, or walking to another directory, stops that.
+  // Show whatever landed first, upgrading to the gallery page once the agent
+  // writes it. A manual pick, or walking to another directory, stops that.
   useEffect(() => {
     if (picked) return
-    const sheet = rows.find(row => row.name === 'contact-sheet.png')
-    const best = sheet ?? rows.find(row => row.type === 'file' && row.kind === 'image')
+    const gallery = rows.find(row => row.name === 'index.html')
+    const best =
+      gallery ??
+      rows.find(row => row.type === 'file' && row.name.endsWith('.html')) ??
+      rows.find(row => row.type === 'file' && row.kind === 'image')
     if (best && best.path !== selected) setSelected(best.path)
   }, [rows, picked, selected])
 
+  // A page can only be rendered from the sandbox's own server: relative refs
+  // (hero.png) and the gallery's nested iframes need a real origin, which a
+  // srcdoc blob does not have.
+  const servedUrl =
+    gallery && servedRoot && selected?.startsWith(`${servedRoot}/`)
+      ? `${gallery}/${selected.slice(servedRoot.length + 1)}`
+      : null
+
   const revision = rows.find(row => row.path === selected)?.bytes ?? ''
-  const { data: body, isPending, error } = useSandboxFile(chatId, selected, query, !ended, revision)
+  const { data: body, isPending, error } = useSandboxFile(chatId, selected, !ended, revision)
   const loading = selected !== null && isPending
 
   // A new file starts at its top. Without this the previous file's scroll
@@ -245,6 +260,7 @@ export function FilePane({
             loading={false}
             mime={body?.mime}
             path={selected}
+            servedUrl={servedUrl}
           />
         )}
       </div>

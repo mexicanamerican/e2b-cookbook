@@ -22,31 +22,21 @@ import {
   type RunSummary,
 } from '@/lib/runs'
 
-/** `?fixture=happy&pace=400` replays a turn with no sandbox and no tokens. */
-function fixtureQuery(): string {
-  const page = new URLSearchParams(window.location.search)
-  const passed = new URLSearchParams()
-  for (const key of ['fixture', 'pace']) {
-    const value = page.get(key)
-    if (value) passed.set(key, value)
-  }
-  const query = passed.toString()
-  return query ? `&${query}` : ''
-}
-
 /** One run: its own chat id, its own sandbox, its own transcript. */
 function ChatSurface({
   runId,
   title,
-  query,
   prompt,
+  brand,
+  sizes,
   live,
   onFirstPrompt,
 }: {
   runId: string
   title: string
-  query: string
   prompt: string
+  brand?: string
+  sizes?: number
   live: boolean
   onFirstPrompt: (text: string) => void
 }) {
@@ -55,7 +45,7 @@ function ChatSurface({
   const { messages, sendMessage, status, error } = useChat<WorkbenchMessage>({
     id: runId,
     messages: loadMessages(runId),
-    transport: new DefaultChatTransport({ api: `/api/chat?${query.slice(1)}` }),
+    transport: new DefaultChatTransport({ api: '/api/chat' }),
   })
 
   // History survives a reload and a run switch; the server keeps none of it.
@@ -75,7 +65,8 @@ function ChatSurface({
 
   // The gallery only exists once the agent has served it, so ask when a turn
   // has settled and something came out of it.
-  const { data: gallery } = useGallery(runId, query, status === 'ready' && artifacts.length > 0)
+  const { data: served } = useGallery(runId, status === 'ready' && artifacts.length > 0)
+  const gallery = served?.gallery ?? null
 
   // A dead API surfaces in useChat as a bare "An error occurred." — say what it
   // actually is, since the fix is a command rather than a retry.
@@ -88,9 +79,8 @@ function ChatSurface({
 
   const busy = status === 'submitted' || status === 'streaming'
   const started = messages.length > 0
-  // Fixture mode serves files from disk, so artefacts are readable without a
-  // live sandbox; a real run needs its sandbox still standing.
-  const readable = live || query.length > 0
+  // Artefacts live in the sandbox, so they are readable exactly as long as it is.
+  const readable = live
 
   // A suggestion names the run after its card; typed prompts name it after
   // themselves. Either way the sidebar reads like a list of jobs, not of blobs.
@@ -110,11 +100,6 @@ function ChatSurface({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {query && (
-              <span className="border border-stroke bg-bg-1 px-1.5 py-0.5 font-mono text-[10px] text-fg-tertiary">
-                fixture
-              </span>
-            )}
             {gallery && (
               <a
                 className="border border-stroke bg-bg-1 px-2.5 py-1 text-[11.5px] text-fg-secondary transition-colors hover:border-stroke-active hover:text-fg"
@@ -143,14 +128,19 @@ function ChatSurface({
                     : error
                 }
                 messages={messages}
-                query={query}
                 readable={readable}
                 status={status}
               />
             ) : (
               <div className="flex min-h-full flex-col justify-center gap-8 py-10">
                 <Greeting />
-                <SuggestedActions disabled={busy || !prompt} onPick={send} prompt={prompt} />
+                <SuggestedActions
+                  brand={brand}
+                  disabled={busy || !prompt}
+                  onPick={send}
+                  prompt={prompt}
+                  sizes={sizes}
+                />
               </div>
             )}
           </div>
@@ -172,16 +162,16 @@ function ChatSurface({
         announced={artifacts}
         busy={busy}
         chatId={runId}
+        gallery={gallery}
         live={readable}
-        query={query}
+        servedRoot={served?.servedRoot ?? null}
       />
     </main>
   )
 }
 
 export function App() {
-  const query = useMemo(fixtureQuery, [])
-  const { data: health } = useHealth(query)
+  const { data: health } = useHealth()
   const prompt = health?.prompt ?? ''
   const { data: liveIds = new Set<string>() } = useLiveRuns()
   const [runs, setRuns] = useState<RunSummary[]>(() => {
@@ -222,11 +212,12 @@ export function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Keyed so switching runs remounts the chat with that run's history. */}
         <ChatSurface
+          brand={health?.brand}
           key={activeId}
           live={liveIds.has(activeId)}
           onFirstPrompt={text => setRuns(titleRun(activeId, text))}
           prompt={prompt}
-          query={query}
+          sizes={health?.sizes}
           runId={activeId}
           title={runs.find(run => run.id === activeId)?.title ?? 'New run'}
         />

@@ -1,23 +1,11 @@
 {
   "version": 1,
   "skills": {
-    "ad-creative": {
-      "source": "coreyhaines31/marketingskills",
+    "banner-design": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
-      "skillPath": "skills/ad-creative/SKILL.md",
-      "computedHash": "af571e0b3629999a241951e61de1893bc5c830106452f147d403dfadba146d57"
-    },
-    "canvas-design": {
-      "source": "anthropics/skills",
-      "sourceType": "github",
-      "skillPath": "skills/canvas-design/SKILL.md",
-      "computedHash": "3fa7ea60170023ad8268bf9fd734ea75dd404279a2ef8ddf5abaa1102ad8e5f4"
-    },
-    "visual-hierarchy": {
-      "source": "owl-listener/designer-skills",
-      "sourceType": "github",
-      "skillPath": "ui-design/skills/visual-hierarchy/SKILL.md",
-      "computedHash": "82681317a11c4a286658bd740be38c90481fe2ec3220ea7c983b223e1b231629"
+      "skillPath": ".claude/skills/banner-design/SKILL.md",
+      "computedHash": "82c86217829268afd1f86e89390270e35cb3a1761854a0bbe6180929614ae022"
     }
   }
 }

@@ -28,12 +28,12 @@ const POLL_BUSY_MS = 1500
 const POLL_IDLE_MS = 6000
 
 /** One directory of the sandbox, polled faster while the agent is working. */
-export function useDirectory(chatId: string, dir: string, query: string, busy: boolean) {
+export function useDirectory(chatId: string, dir: string, busy: boolean) {
   return useQuery({
-    queryKey: ['files', chatId, dir, query],
+    queryKey: ['files', chatId, dir],
     queryFn: () =>
       get<{ entries?: Entry[]; gallery?: string | null }>(
-        `/api/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(dir)}${query}`,
+        `/api/files?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(dir)}`,
       ),
     refetchInterval: busy ? POLL_BUSY_MS : POLL_IDLE_MS,
     select: result => result.entries ?? [],
@@ -48,15 +48,14 @@ export function useDirectory(chatId: string, dir: string, query: string, busy: b
 export function useSandboxFile(
   chatId: string,
   path: string | null,
-  query: string,
   enabled = true,
   revision: string | number = '',
 ) {
   return useQuery({
-    queryKey: ['file', chatId, path, query, revision],
+    queryKey: ['file', chatId, path, revision],
     queryFn: () =>
       get<FileBody>(
-        `/api/file?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(path!)}${query}`,
+        `/api/file?chatId=${encodeURIComponent(chatId)}&path=${encodeURIComponent(path!)}`,
       ),
     enabled: enabled && path !== null,
     // Bytes at a given revision do not change; nothing is gained by re-reading.
@@ -65,13 +64,18 @@ export function useSandboxFile(
 }
 
 /** The gallery the agent serves, once it has produced anything. */
-export function useGallery(chatId: string, query: string, enabled: boolean) {
+export function useGallery(chatId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ['gallery', chatId, query],
+    queryKey: ['gallery', chatId],
     queryFn: () =>
-      get<{ gallery?: string | null }>(`/api/files?chatId=${encodeURIComponent(chatId)}${query}`),
+      get<{ gallery?: string | null; servedRoot?: string }>(
+        `/api/files?chatId=${encodeURIComponent(chatId)}`,
+      ),
     enabled,
-    select: result => result.gallery ?? null,
+    select: result => ({
+      gallery: result.gallery ?? null,
+      servedRoot: result.servedRoot ?? null,
+    }),
   })
 }
 
@@ -86,10 +90,10 @@ export function useLiveRuns() {
 }
 
 /** The server owns the ad-set prompt, so the card and the run cannot drift. */
-export function useHealth(query: string) {
+export function useHealth() {
   return useQuery({
-    queryKey: ['health', query],
-    queryFn: () => get<{ prompt?: string }>(`/api/health${query ? `?${query.slice(1)}` : ''}`),
+    queryKey: ['health'],
+    queryFn: () => get<{ prompt?: string; brand?: string; sizes?: number }>('/api/health'),
     staleTime: Number.POSITIVE_INFINITY,
   })
 }
