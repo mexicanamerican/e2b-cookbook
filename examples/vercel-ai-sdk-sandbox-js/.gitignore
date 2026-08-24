@@ -1,0 +1,12 @@
+# artefacts the creative-production lane pulls back out of the sandbox
+contact-sheet.png
+ad-set.tar.gz
+key-visual.png
+
+# Restored from skills-lock.json by `npm run skills`
+.agents/skills/
+.claude/skills/
+
+# npm is the package manager this example documents (see README); pnpm state is local
+pnpm-lock.yaml
+pnpm-workspace.yaml
