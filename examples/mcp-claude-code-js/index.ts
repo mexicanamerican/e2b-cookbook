@@ -12,6 +12,9 @@ async function runClaudeCodeExample() {
   
   // Create E2B sandbox with MCP servers
   const sandbox = await Sandbox.create({
+    // The research below is an open-ended agent run over two MCP servers, so it
+    // can outlive the 5 minute default and take the sandbox down with it.
+    timeoutMs: 600_000,
     envs: {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY!,
     },
