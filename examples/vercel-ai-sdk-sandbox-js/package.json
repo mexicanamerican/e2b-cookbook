@@ -4,8 +4,10 @@
   "type": "module",
   "description": "Vercel AI SDK agents on E2B sandboxes via @e2b/ai-sdk-sandbox",
   "scripts": {
+    "skills": "npx -y skills experimental_install",
     "start": "tsx src/tool.ts",
-    "start:harness": "tsx src/harness.ts"
+    "start:harness": "tsx src/harness.ts",
+    "start:creative": "tsx src/harness-ai-creative-production-agent.ts"
   },
   "license": "MIT",
   "dependencies": {
@@ -16,6 +18,7 @@
     "@e2b/ai-sdk-sandbox": "^0.1.0",
     "ai": "^7.0.66",
     "dotenv": "^17.4.2",
+    "e2b": "^2.40.0",
     "tsx": "^4.19.4",
     "zod": "^3.25.76"
   }
