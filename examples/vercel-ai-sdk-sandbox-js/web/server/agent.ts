@@ -11,6 +11,7 @@ import { generateImage, toUIMessageStream, type UIMessageStreamWriter } from 'ai
 import { Sandbox } from 'e2b'
 import {
   artifactKind,
+  isBinaryKind,
   HOME_DIR,
   mimeFor,
   type Artifact,
@@ -18,8 +19,9 @@ import {
   type FileBody,
   type WorkbenchMessage,
 } from '../src/lib/protocol.ts'
-import { loadSkills, mountFonts, mountRenderer } from '../../src/skills.ts'
-import { AD_SET_PROMPT, BRIEF, BRIEF_DIR, HERO_PROMPT, OUT_DIR } from './brief.ts'
+import { loadSkills } from '../../src/skills.ts'
+import { AD_SET_PROMPT, BRIEF, BRIEF_DIR, HERO_PROMPT, OUT_DIR, SERVE_COMMAND } from './brief.ts'
+import { cutHero } from '../../src/hero.ts'
 
 const SANDBOX_TIMEOUT_MS = 15 * 60 * 1000
 const ARTIFACT_POLL_MS = 1200
@@ -69,14 +71,16 @@ async function open(chatId: string, brief: string): Promise<Workbench> {
       generateImage({ model: openai.image('gpt-image-2'), size: '1024x1024', prompt: HERO_PROMPT }),
       sandbox.files.makeDir(OUT_DIR).catch(() => undefined),
       sandbox.files.write(`${BRIEF_DIR}/brand.json`, JSON.stringify(BRIEF, null, 2)),
-      // The typefaces the brief insists on. Binary, so they travel as files
-      // rather than as skill content.
-      mountFonts(sandbox),
-      // The renderer. Layout is code, not something the agent re-derives.
-      mountRenderer(sandbox),
     ])
+    // Into the served directory, so the pages can reference it as `hero.png`.
     // `files.write` takes an ArrayBuffer; the copy re-homes the view's bytes.
-    await sandbox.files.write(`${BRIEF_DIR}/hero.png`, new Uint8Array(image.uint8Array).buffer)
+    await sandbox.files.write(`${OUT_DIR}/hero.png`, new Uint8Array(image.uint8Array).buffer)
+    // The cutout is mechanical and checkable, so it is not left to the prompt —
+    // a skipped cutout shows up as a white box behind the product, not an error.
+    await cutHero(sandbox)
+    // Serve OUT_DIR ourselves, so the file pane can preview the first page the
+    // agent writes instead of waiting for it to start a server of its own.
+    await sandbox.commands.run(SERVE_COMMAND)
   })()
 
   benches.set(chatId, bench)
@@ -164,14 +168,18 @@ function confineToWorkspace(requested: string): string {
   return resolved
 }
 
-/** One directory of the sandbox, for the file browser. */
+/**
+ * One directory of the sandbox, for the file browser. Dotfiles included on
+ * purpose: `.agents/skills` is where the harness materializes the skills the
+ * agent is working from, so hiding it hides the most interesting directory in
+ * the box. Artefact announcements still skip them — see listWorkspace.
+ */
 export async function listDir(chatId: string, requested: string): Promise<Entry[]> {
   const dir = confineToWorkspace(requested)
   const bench = benches.get(chatId)
   if (!bench) return []
   const entries = await bench.sandbox.files.list(dir).catch(() => [])
   return entries
-    .filter(entry => !entry.name.startsWith('.'))
     .map(entry => ({
       path: `${dir === '/' ? '' : dir}/${entry.name}`,
       name: entry.name,
@@ -191,7 +199,7 @@ export async function readArtifact(chatId: string, requested: string): Promise<F
   const bench = benches.get(chatId)
   if (!bench) throw new Error('That chat has no sandbox yet.')
   const mime = mimeFor(path)
-  const binary = artifactKind(path) !== 'text'
+  const binary = isBinaryKind(artifactKind(path))
   if (binary) {
     const bytes = await bench.sandbox.files.read(path, { format: 'bytes' })
     return { path, mime, encoding: 'base64', content: Buffer.from(bytes).toString('base64') }
