@@ -91,7 +91,8 @@ export function isScenario(value: string | null): value is Scenario {
   return value !== null && (SCENARIOS as string[]).includes(value)
 }
 
-const AD_FILES = BRIEF.sizes.map(size => `ad_${size}.png`)
+// render.py writes `OUT_DIR / f"{size}.png"`, so the fixture uses the same names.
+const AD_FILES = BRIEF.sizes.map(size => `${size}.png`)
 
 // The real brand_check.py prints a markdown table, so the fixture does too —
 // the page renders these rows as a table, not as a monospace block.
@@ -119,7 +120,7 @@ type Step =
   | { kind: 'say'; text: string }
   | { kind: 'write'; path: string; summary: string }
   | { kind: 'bash'; command: string; stdout: string }
-  | { kind: 'artifact'; name: string; bytes: number }
+  | { kind: 'artifact'; name: string }
   | { kind: 'fail'; message: string }
 
 function plan(scenario: Scenario): Step[] {
@@ -152,12 +153,10 @@ function plan(scenario: Scenario): Step[] {
       command: 'python3 /home/user/brief/render.py',
       stdout: [...AD_FILES.map(f => `rendered ${f}`), 'rendered contact-sheet.png'].join('\n'),
     },
-    ...AD_FILES.map((name, index): Step => ({
-      kind: 'artifact',
-      name,
-      bytes: 41_000 - index * 6_500,
-    })),
-    { kind: 'artifact', name: 'contact-sheet.png', bytes: 411_519 },
+    // Byte counts are resolved from the committed fixtures at replay time, so
+    // the size the transcript announces is the size the file pane then reads.
+    ...AD_FILES.map((name): Step => ({ kind: 'artifact', name })),
+    { kind: 'artifact', name: 'contact-sheet.png' },
     { kind: 'write', path: 'brief/brand_check.py', summary: 'dimensions, WCAG contrast, palette share' },
     {
       kind: 'bash',
@@ -170,8 +169,8 @@ function plan(scenario: Scenario): Step[] {
       command: 'python3 /home/user/brief/gallery.py && tar -czf /home/user/out/ad-set.tar.gz -C /home/user/out .',
       stdout: 'wrote /home/user/out/index.html\nserving /home/user/out on :3000',
     },
-    { kind: 'artifact', name: 'index.html', bytes: 1_284 },
-    { kind: 'artifact', name: 'ad-set.tar.gz', bytes: 476_332 },
+    { kind: 'artifact', name: 'index.html' },
+    { kind: 'artifact', name: 'ad-set.tar.gz' },
     {
       kind: 'say',
       // Unfenced: the audit is a table, and fencing it would print the pipes.
@@ -191,6 +190,9 @@ async function replay(
 ) {
   let counter = 0
   const nextId = () => `fixture-${++counter}`
+  // What fixtures/out actually holds. An artefact the page could not then open
+  // is worse than one it never saw, so anything missing is not announced.
+  const onDisk = new Map((await fixtureArtifacts()).map(file => [file.name, file.bytes]))
 
   for (const step of plan(scenario)) {
     await sleep(pace)
@@ -210,11 +212,13 @@ async function replay(
       continue
     }
     if (step.kind === 'artifact') {
+      const bytes = onDisk.get(step.name)
+      if (bytes === undefined) continue
       const artifact: Artifact = {
         path: `${OUT_DIR}/${step.name}`,
         name: step.name,
         kind: artifactKind(step.name),
-        bytes: step.bytes,
+        bytes,
       }
       writer.write({ type: 'data-artifact', id: artifact.path, data: artifact })
       continue
