@@ -6,8 +6,17 @@ async function runClaudeCodeExample() {
   
   // Create E2B sandbox with MCP servers
   const sandbox = await Sandbox.create({
+    // The research below is an open-ended agent run over two MCP servers, so it
+    // can outlive the 5 minute default and take the sandbox down with it.
+    timeoutMs: 600_000,
     envs: {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY!,
+      // Commands in an MCP-enabled sandbox run as root, and Claude Code refuses
+      // --dangerously-skip-permissions under root. IS_SANDBOX is the supported
+      // way to say "this whole machine is the sandbox", which is exactly true
+      // here. Note --allow-dangerously-skip-permissions does not do this: it
+      // offers the bypass without enabling it, and is still refused under root.
+      IS_SANDBOX: '1',
     },
     mcp: {
       duckduckgo: {},
@@ -37,7 +46,7 @@ async function runClaudeCodeExample() {
   
   // Run Claude Code with research task
   await sandbox.commands.run(
-    `echo 'Use arxiv to search for a new paper about large language models and summarize it. Then use duckduckgo to find information about the main authors. Finally, create a minimal index.html page (in /web directory) outlining the paper and authors.' | claude -p --dangerously-skip-permissions`,
+    `echo 'Use arxiv to search for a new paper about large language models and summarize it. Then use duckduckgo to find information about the main authors. Finally, create a minimal index.html page at the absolute path /web/index.html outlining the paper and authors.' | claude -p --dangerously-skip-permissions`,
     { 
       timeoutMs: 0, 
       onStdout: console.log, 
@@ -46,8 +55,11 @@ async function runClaudeCodeExample() {
   );
 
   console.log('Starting web server to host the research results...');
+  // Absolute on both sides, matching the path the prompt above pins. A relative
+  // 'web' resolves against the command's cwd, which is the gateway's own
+  // directory, so the server came up on an empty root and the printed link 404d.
   await sandbox.commands.run(
-    'python3 -m http.server 3000 -d web', 
+    'python3 -m http.server 3000 -d /web', 
     { 
       background: true, 
       timeoutMs: 0, 

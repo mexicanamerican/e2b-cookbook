@@ -11,6 +11,14 @@ on:
         type: choice
         default: 'off'
         options: ['off', 'ok', 'failure']
+      examples:
+        description: >-
+          Space-separated substring filters, so a fix can be verified without
+          running all 31 examples and paying four providers for the privilege.
+          Leave empty to run everything. A filtered run does not post to Slack,
+          since a partial result read as a full one is worse than no message.
+        type: string
+        default: ''
       rebuild_templates:
         description: >-
           Rebuild the custom E2B templates instead of reusing existing ones.
@@ -61,7 +69,12 @@ jobs:
     - name: Run the examples and save results
       id: tests
       if: inputs.preview_message == '' || inputs.preview_message == 'off'
-      run: npm test
+      # Through the environment, not spliced into the command line: a dispatch
+      # input is attacker-controlled the moment write access is. Unquoted on
+      # purpose, so several filters still word-split into separate arguments.
+      run: npm test -- $EXAMPLES
+      env:
+        EXAMPLES: ${{ inputs.examples }}
       continue-on-error: true
 
     # Preview mode: synthesise the results instead of running anything, so the
@@ -107,7 +120,7 @@ jobs:
     # rather than failed when no webhook is configured, so forks and manual runs
     # do not go red over a missing secret.
     - name: Notify Slack
-      if: always() && env.SLACK_WEBHOOK != ''
+      if: always() && env.SLACK_WEBHOOK != '' && !inputs.examples
       env:
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
       run: |

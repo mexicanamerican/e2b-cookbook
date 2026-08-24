@@ -149,6 +149,11 @@ const TIMEOUT_OVERRIDES: Record<string, number> = {
   'openai-codex-in-sandbox-js': 600_000,
   'openai-codex-in-sandbox-python': 600_000,
   'playwright-in-e2b': 300_000,
+  // Same shape: Claude Code doing multi-step research over two MCP servers
+  // (arxiv, duckduckgo) before it writes the page. It fit the shared budget
+  // only by accident - 112s of 150s on its last green run - so one slow arxiv
+  // search was always going to end it, and one did.
+  'mcp-claude-code-js': 600_000,
 }
 
 // Examples that run from a custom template need it built on the account first.
