@@ -46,7 +46,7 @@ async function runClaudeCodeExample() {
   
   // Run Claude Code with research task
   await sandbox.commands.run(
-    `echo 'Use arxiv to search for a new paper about large language models and summarize it. Then use duckduckgo to find information about the main authors. Finally, create a minimal index.html page (in /web directory) outlining the paper and authors.' | claude -p --dangerously-skip-permissions`,
+    `echo 'Use arxiv to search for a new paper about large language models and summarize it. Then use duckduckgo to find information about the main authors. Finally, create a minimal index.html page at the absolute path /web/index.html outlining the paper and authors.' | claude -p --dangerously-skip-permissions`,
     { 
       timeoutMs: 0, 
       onStdout: console.log, 
@@ -55,8 +55,11 @@ async function runClaudeCodeExample() {
   );
 
   console.log('Starting web server to host the research results...');
+  // Absolute on both sides, matching the path the prompt above pins. A relative
+  // 'web' resolves against the command's cwd, which is the gateway's own
+  // directory, so the server came up on an empty root and the printed link 404d.
   await sandbox.commands.run(
-    'python3 -m http.server 3000 -d web', 
+    'python3 -m http.server 3000 -d /web', 
     { 
       background: true, 
       timeoutMs: 0, 
