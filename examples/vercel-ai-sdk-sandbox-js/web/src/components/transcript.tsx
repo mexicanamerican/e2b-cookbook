@@ -157,14 +157,12 @@ export function Transcript({
   status,
   error,
   chatId,
-  query,
   readable,
 }: {
   messages: WorkbenchMessage[]
   status: string
   error: Error | undefined
   chatId: string
-  query: string
   /** False once the run's sandbox has gone — thumbnails would 404. */
   readable: boolean
 }) {
@@ -208,7 +206,6 @@ export function Transcript({
                     artifact={part.data}
                     chatId={chatId}
                     key={key}
-                    query={query}
                     readable={readable}
                   />
                 )

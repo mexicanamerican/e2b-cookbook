@@ -10,12 +10,10 @@ import type { Artifact } from '@/lib/protocol'
 export function ArtifactThumb({
   artifact,
   chatId,
-  query,
   readable,
 }: {
   artifact: Artifact
   chatId: string
-  query: string
   readable: boolean
 }) {
   const isImage = artifact.kind === 'image'
@@ -24,7 +22,6 @@ export function ArtifactThumb({
   const { data: body, isPending } = useSandboxFile(
     chatId,
     artifact.path,
-    query,
     isImage && readable,
     artifact.bytes,
   )

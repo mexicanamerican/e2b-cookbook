@@ -10,13 +10,22 @@ export function SuggestedActions({
   onPick,
   disabled,
   prompt,
+  brand,
+  sizes,
 }: {
   onPick: (suggestion: string, label?: string) => void
   disabled?: boolean
   prompt: string
+  brand?: string
+  sizes?: number
 }) {
   const cards: { label: string; text: string }[] = [
-    { label: 'Produce the Aurora Cold Brew ad set — five sizes, brand audit, gallery', text: prompt },
+    {
+      // Named by the API, like the prompt beside it — the brief is the only
+      // place a product name is written down.
+      label: `Produce the ${brand ?? 'ad'} ad set — ${sizes ?? 'every'} sizes, brand audit, gallery`,
+      text: prompt,
+    },
     ...EXTRAS.map(text => ({ label: text, text })),
   ]
   return (
