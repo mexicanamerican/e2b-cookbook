@@ -13,8 +13,9 @@ import { createE2BSandbox } from '@e2b/ai-sdk-sandbox'
 import { openai } from '@ai-sdk/openai'
 import { generateImage } from 'ai'
 import { Sandbox } from 'e2b'
-import { AD_SET_PROMPT, BRIEF, BRIEF_DIR, HERO_PROMPT, OUT_DIR } from './brief.ts'
-import { loadSkills, mountFonts, mountRenderer } from './skills.ts'
+import { AD_SET_PROMPT, BRIEF, BRIEF_DIR, HERO_PROMPT, OUT_DIR, SERVE_COMMAND } from './brief.ts'
+import { cutHero } from './hero.ts'
+import { loadSkills } from './skills.ts'
 
 // Pi drives the sandbox; Anthropic when its key is set, matching the other lanes.
 const [auth, model] = process.env.ANTHROPIC_API_KEY
@@ -38,23 +39,24 @@ const sbx = await Sandbox.create({ timeoutMs: 15 * 60 * 1000 })
 console.log(`sandbox ${sbx.sandboxId} ready`)
 
 try {
-  // 3. The asset crosses the boundary, with the brief beside it.
+  // 3. The asset crosses the boundary, with the brief beside it. The hero lands
+  // in the served directory so the pages can reference it as `hero.png`.
   // `files.write` takes an ArrayBuffer; the copy re-homes the view's bytes into one.
-  await sbx.files.write(`${BRIEF_DIR}/hero.png`, new Uint8Array(image.uint8Array).buffer)
+  await sbx.files.write(`${OUT_DIR}/hero.png`, new Uint8Array(image.uint8Array).buffer)
   await sbx.files.write(`${BRIEF_DIR}/brand.json`, JSON.stringify(BRIEF, null, 2))
 
-  // 3b. The typefaces, which are binary and so cannot ride the skills API, and
-  //     the renderer, which is code rather than instructions.
-  const fonts = await mountFonts(sbx)
-  await mountRenderer(sbx)
+  // 3b. The cutout, and the server the pages are previewed from. Both are
+  //     mechanical, so the host does them rather than asking for them.
+  console.log(await cutHero(sbx) ?? 'no cutout — the agent gets the uncut hero')
+  await sbx.commands.run(SERVE_COMMAND)
 
-  // 3c. The craft itself. The harness hands these to Pi, which surfaces them
+  // 3b. The craft itself. The harness hands these to Pi, which surfaces them
   //     as skills inside the sandbox — no uploading, no prompt stuffing.
   const skills = await loadSkills()
   console.log(
     skills.length > 0
-      ? `skills: ${skills.map(skill => skill.name).join(', ')} · ${fonts} typefaces`
-      : 'no skills found — run `npm run skills`; the ad set will render without art direction',
+      ? `skills: ${skills.map(skill => skill.name).join(', ')}`
+      : 'no skills found — run `npm run skills`; the ad set will be designed without art direction',
   )
 
   // 4. Pi works inside that same sandbox. Passing the sandbox in — rather than
@@ -70,16 +72,14 @@ try {
   const result = await agent.generate({ session, prompt: AD_SET_PROMPT })
   console.log('\n' + result.text)
 
-  // 6. The deliverables come home.
-  for (const file of ['contact-sheet.png', 'ad-set.tar.gz']) {
-    const bytes = await sbx.files.read(`${OUT_DIR}/${file}`, { format: 'bytes' })
-      .catch(async () => {
-        const { stdout } = await sbx.commands.run(`ls -1 ${OUT_DIR}`)
-        throw new Error(`the agent never produced ${OUT_DIR}/${file}. It left: ${stdout.split('\n').filter(Boolean).join(', ')}`)
-      })
-    await writeFile(file, bytes)
-    console.log(`wrote ./${file} (${bytes.byteLength.toLocaleString()} bytes)`)
+  // 6. The gallery is the deliverable, and it lives in the sandbox — but check
+  //    it exists rather than printing a URL that 404s.
+  const { stdout: produced } = await sbx.commands.run(`ls -1 ${OUT_DIR}`)
+  const pages = produced.split('\n').filter(name => name.endsWith('.html'))
+  if (!pages.includes('index.html')) {
+    throw new Error(`the agent never produced ${OUT_DIR}/index.html. It left: ${produced.split('\n').filter(Boolean).join(', ')}`)
   }
+  console.log(`\n${pages.length} pages: ${pages.join(', ')}`)
 
   // Stop the Pi runtime so this process can exit. In wrap mode the sandbox is
   // ours, not the provider's, so this leaves it — and its server — running.
