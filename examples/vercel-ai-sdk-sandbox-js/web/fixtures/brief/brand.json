@@ -1,0 +1,23 @@
+{
+  "name": "Aurora Cold Brew",
+  "headline": "Brewed cold. Served bold.",
+  "cta": "Shop now",
+  "palette": {
+    "ink": "#0B0B0F",
+    "cream": "#F6F1E7",
+    "accent": "#FF6D00"
+  },
+  "rules": {
+    "minContrast": 4.5,
+    "safeAreaPx": 24,
+    "paletteTolerance": 24,
+    "minColourShare": 0.015
+  },
+  "sizes": [
+    "1200x628",
+    "1080x1080",
+    "300x250",
+    "728x90",
+    "160x600"
+  ]
+}

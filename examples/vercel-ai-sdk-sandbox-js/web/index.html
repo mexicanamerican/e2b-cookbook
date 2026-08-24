@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The E2B mark, keyed to the OS colour scheme rather than the app theme
+      below: the favicon sits in browser chrome, which follows the OS, not
+      the in-app toggle. Light chrome gets the black tile, dark chrome the
+      inverted one. Same pair as openai-agents-api-python-ask.
+    -->
+    <link rel="icon" href="/favicon-light.ico" media="(prefers-color-scheme: light)" sizes="any" />
+    <link rel="icon" href="/favicon-dark.ico" media="(prefers-color-scheme: dark)" sizes="any" />
+    <title>Creative production — E2B</title>
+    <script>
+      // Theme before first paint, so there is no light flash on a dark load.
+      // Defaults to dark unless localStorage says otherwise; the ThemeToggle
+      // is the runtime side of this same contract.
+      try {
+        if (localStorage.getItem('theme') !== 'light') {
+          document.documentElement.classList.add('dark')
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
