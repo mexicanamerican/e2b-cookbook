@@ -7,7 +7,19 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
-from main import SKILL_NAME, run_demo
+from unittest.mock import patch
+
+from e2b import AuthenticationException, CommandExitException, TimeoutException
+
+from main import (
+    DETAIL_TAIL,
+    RUN_METADATA,
+    SANDBOX_TIMEOUT,
+    SKILL_NAME,
+    _failure_detail,
+    main,
+    run_demo,
+)
 
 
 @dataclass
@@ -18,9 +30,15 @@ class RecordedResult:
 
 
 class RecordingCommands:
-    def __init__(self, *, fail_first_agent: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_first_agent: bool = False,
+        fail_skill_check: bool = False,
+    ) -> None:
         self.commands: list[str] = []
         self.fail_first_agent = fail_first_agent
+        self.fail_skill_check = fail_skill_check
         self.agent_runs = 0
 
     def run(self, command: str, **_: object) -> RecordedResult:
@@ -28,8 +46,20 @@ class RecordingCommands:
         if command.startswith("hermes chat"):
             self.agent_runs += 1
             if self.fail_first_agent and self.agent_runs == 1:
-                return RecordedResult(1, "", "provider failed")
+                raise CommandExitException(
+                    stdout="API call failed after 3 retries: provider failed",
+                    stderr="\u26a0 Deprecated .env settings detected",
+                    exit_code=1,
+                    error=None,
+                )
         if command.startswith("find "):
+            if self.fail_skill_check:
+                raise CommandExitException(
+                    stderr="skills directory missing",
+                    stdout="",
+                    exit_code=1,
+                    error=None,
+                )
             return RecordedResult(
                 stdout=f"/home/user/.hermes/skills/{SKILL_NAME}/SKILL.md\n"
             )
@@ -45,8 +75,16 @@ class RecordingFiles:
 
 
 class RecordingSandbox:
-    def __init__(self, *, fail_first_agent: bool = False) -> None:
-        self.commands = RecordingCommands(fail_first_agent=fail_first_agent)
+    def __init__(
+        self,
+        *,
+        fail_first_agent: bool = False,
+        fail_skill_check: bool = False,
+    ) -> None:
+        self.commands = RecordingCommands(
+            fail_first_agent=fail_first_agent,
+            fail_skill_check=fail_skill_check,
+        )
         self.files = RecordingFiles()
         self.killed = False
 
@@ -101,6 +139,8 @@ class HermesIncidentPlaybookTests(unittest.TestCase):
             factory.calls[0][1]["envs"],
             {"OPENROUTER_API_KEY": "or_test"},
         )
+        self.assertEqual(factory.calls[0][1]["metadata"], RUN_METADATA)
+        self.assertEqual(factory.calls[0][1]["timeout"], SANDBOX_TIMEOUT)
         agent_commands = [
             command
             for command in sandbox.commands.commands
@@ -131,6 +171,75 @@ class HermesIncidentPlaybookTests(unittest.TestCase):
                     )
 
         self.assertTrue(sandbox.killed)
+
+    def test_kills_the_sandbox_when_the_skill_check_fails(self) -> None:
+        sandbox = RecordingSandbox(fail_skill_check=True)
+        factory = RecordingFactory(sandbox)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "did not create the expected"):
+                with redirect_stdout(StringIO()):
+                    run_demo(
+                        environ={
+                            "E2B_API_KEY": "e2b_test",
+                            "OPENROUTER_API_KEY": "or_test",
+                        },
+                        sandbox_factory=factory,
+                        example_directory=self._example(Path(directory)),
+                    )
+
+        self.assertTrue(sandbox.killed)
+
+    def test_surfaces_the_real_cause_not_just_the_startup_warning(self) -> None:
+        # The hermes template always writes a deprecation warning to stderr, so
+        # reporting stderr alone would hide the real failure on stdout.
+        sandbox = RecordingSandbox(fail_first_agent=True)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError) as caught:
+                with redirect_stdout(StringIO()):
+                    run_demo(
+                        environ={
+                            "E2B_API_KEY": "e2b_test",
+                            "OPENROUTER_API_KEY": "or_test",
+                        },
+                        sandbox_factory=RecordingFactory(sandbox),
+                        example_directory=self._example(Path(directory)),
+                    )
+
+        message = str(caught.exception)
+        self.assertIn("API call failed after 3 retries", message)
+        self.assertIn("Deprecated .env settings", message)
+        self.assertTrue(sandbox.killed)
+
+    def test_bounds_a_noisy_failure_detail(self) -> None:
+        # Under -Q the real template still prints tool diffs to stdout, so a
+        # failed turn produced a ~4.5k-character message. The cause is the last
+        # thing written, so the tail is what has to survive truncation.
+        noise = "+ review diff line\n" * 400
+        error = CommandExitException(
+            stdout=noise + "API call failed after 3 retries: Gemini HTTP 503",
+            stderr="",
+            exit_code=1,
+            error=None,
+        )
+        detail = _failure_detail(error)
+        self.assertIn("Gemini HTTP 503", detail)
+        self.assertLessEqual(len(detail), DETAIL_TAIL + 3)
+        self.assertTrue(detail.startswith("..."))
+
+    def test_reports_sdk_failures_without_a_traceback(self) -> None:
+        # A bad key, an unreachable template, a killed sandbox, or a turn that
+        # outran its timeout must all exit with a message, not a traceback.
+        for error in (
+            TimeoutException("sandbox timed out"),
+            AuthenticationException("invalid api key"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                with patch("main.run_demo", side_effect=error):
+                    with self.assertRaises(SystemExit) as caught:
+                        main()
+                self.assertEqual(str(caught.exception), str(error))
 
     def test_requires_e2b_and_provider_credentials(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Missing E2B_API_KEY"):

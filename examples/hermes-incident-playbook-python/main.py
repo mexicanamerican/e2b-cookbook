@@ -9,10 +9,18 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from e2b import AuthenticationException, CommandExitException, SandboxException
+
 EXAMPLE_DIRECTORY = Path(__file__).resolve().parent
 SANDBOX_WORKSPACE = "/home/user/incident-workspace"
 SKILL_NAME = "incident-triage"
 KEY_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+AGENT_TIMEOUT = 600
+# Allow two sequential agent turns plus workspace setup and file transfers.
+SANDBOX_TIMEOUT = 1500
+RUN_METADATA = {"example": "hermes-incident-playbook-python"}
+# Hermes still writes tool diffs to stdout under -Q, so bound what a failure reports.
+DETAIL_TAIL = 600
 
 
 class CommandResult(Protocol):
@@ -81,11 +89,29 @@ def _hermes_command(
     return shlex.join(arguments)
 
 
+def _tail(stream: str, limit: int = DETAIL_TAIL) -> str:
+    text = (stream or "").strip()
+    return text if len(text) <= limit else "..." + text[-limit:]
+
+
+def _failure_detail(error: CommandExitException) -> str:
+    # Hermes writes its real failure to stdout and its warnings to stderr, and
+    # the template always emits a startup warning, so reporting stderr alone
+    # would surface that warning and hide the cause. Even under -Q, Hermes
+    # still prints tool diffs, so keep the tail of each stream: the failure is
+    # the last thing written, not the first.
+    parts = [tail for tail in (_tail(error.stdout), _tail(error.stderr)) if tail]
+    return " | ".join(parts) or str(error)
+
+
 def _run_agent(sandbox: SandboxLike, command: str) -> str:
-    result: CommandResult = sandbox.commands.run(command, timeout=600)
-    if result.exit_code != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(f"Hermes failed: {detail}")
+    try:
+        result: CommandResult = sandbox.commands.run(
+            command,
+            timeout=AGENT_TIMEOUT,
+        )
+    except CommandExitException as error:
+        raise RuntimeError(f"Hermes failed: {_failure_detail(error)}") from error
     return result.stdout
 
 
@@ -108,14 +134,19 @@ def run_demo(
     sandbox = sandbox_factory(
         template,
         envs=provider_env,
-        timeout=900,
+        metadata=RUN_METADATA,
+        timeout=SANDBOX_TIMEOUT,
     )
     try:
-        setup = sandbox.commands.run(
-            f"mkdir -p {SANDBOX_WORKSPACE}/incidents {SANDBOX_WORKSPACE}/reports"
-        )
-        if setup.exit_code != 0:
-            raise RuntimeError(f"Could not prepare workspace: {setup.stderr}")
+        try:
+            sandbox.commands.run(
+                f"mkdir -p {SANDBOX_WORKSPACE}/incidents "
+                f"{SANDBOX_WORKSPACE}/reports"
+            )
+        except CommandExitException as error:
+            raise RuntimeError(
+                f"Could not prepare workspace: {_failure_detail(error)}"
+            ) from error
 
         sandbox.files.write(
             f"{SANDBOX_WORKSPACE}/runbook.md",
@@ -148,11 +179,16 @@ this service's incident inputs and reports live. Do not modify the input files.
         )
         print(first_response.strip())
 
-        skill_check = sandbox.commands.run(
-            "find \"$HOME/.hermes/skills\" -type f "
-            f"-path '*/{SKILL_NAME}/SKILL.md' -print -quit"
-        )
-        if skill_check.exit_code != 0 or not skill_check.stdout.strip():
+        try:
+            skill_check = sandbox.commands.run(
+                "find \"$HOME/.hermes/skills\" -type f "
+                f"-path '*/{SKILL_NAME}/SKILL.md' -print -quit"
+            )
+        except CommandExitException as error:
+            raise RuntimeError(
+                f"Hermes did not create the expected {SKILL_NAME} skill."
+            ) from error
+        if not skill_check.stdout.strip():
             raise RuntimeError(
                 f"Hermes did not create the expected {SKILL_NAME} skill."
             )
@@ -190,7 +226,10 @@ conclusion, and next action to
 def main() -> None:
     try:
         run_demo()
-    except RuntimeError as error:
+    except (RuntimeError, SandboxException, AuthenticationException) as error:
+        # Every failure the SDK can raise here is an environment or provider
+        # problem, not a bug worth a traceback: a bad key, an unreachable
+        # template, a killed sandbox, or a turn that outran its timeout.
         raise SystemExit(str(error)) from error
 
 

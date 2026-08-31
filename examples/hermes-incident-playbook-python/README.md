@@ -4,6 +4,8 @@ This example runs [Hermes Agent](https://github.com/NousResearch/hermes-agent) i
 
 The scenario is designed around Hermes' closed learning loop rather than a generic agent prompt. E2B contains the autonomous tool calls and preserves the workspace, `~/.hermes/memories`, sessions, and user-created skills for the lifetime of the sandbox.
 
+For a shorter introduction to the same learn-then-reuse workflow, see the [Hermes Agent guide](https://e2b.dev/docs/agents/hermes#teach-hermes-a-reusable-skill).
+
 ## What the demo does
 
 1. Creates a sandbox from the pre-built E2B `hermes` template.
